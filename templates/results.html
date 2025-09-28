@@ -79,7 +79,7 @@
           <td>{{ r.max_count }}</td>
           <td>{{ r.momentum_per_hr }}</td>
           <td>{{ r.runs }}</td>
-          <td>{{ r.primary_title_latest }}</td>
+          <td class="topline">{{ r.primary_title_latest }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -87,8 +87,38 @@
   </div>
 </div>
 {% endif %}
-
-
 {% endblock %}
 
-
+{% block scripts %}
+<script>
+// Add the same emoji mapping onto titles so clusters/alerts get quick visual tags.
+(function(){
+  const EMOJI_RULES = [
+    { re: /(fire|wildfire|smoke|burning)/i, emoji: "🚒" },
+    { re: /(explosion|blast|bomb)/i, emoji: "💥" },
+    { re: /(shooting|gunshot|shots? fired|active shooter)/i, emoji: "🆘" },
+    { re: /(protest|demonstration|rally|clash|riot|march)/i, emoji: "✊" },
+    { re: /(police|law enforcement|sheriff|federal agents|ICE|border patrol|troops|national guard|military)/i, emoji: "👮" },
+    { re: /(evacuation|evacuate|shelter[- ]?in[- ]?place|lockdown)/i, emoji: "🚨" },
+    { re: /(storm|hurricane|tornado|severe weather|flood|rain|snow|blizzard)/i, emoji: "⛈️" },
+    { re: /(earthquake|seismic|aftershock)/i, emoji: "🌎" },
+    { re: /(power outage|blackout)/i, emoji: "🔌" },
+    { re: /(road closed|closure|traffic|bridge|highway)/i, emoji: "🚧" },
+  ];
+  function emojiFor(text){
+    for(const rule of EMOJI_RULES){ if(rule.re.test(text)) return rule.emoji; }
+    return "📝";
+  }
+  // Cluster/alert titles
+  document.querySelectorAll('.story-title').forEach(el => {
+    const txt = el.textContent || '';
+    el.textContent = `${emojiFor(txt)} ${txt}`;
+  });
+  // Second-stage toplines (optional)
+  document.querySelectorAll('td.topline').forEach(el => {
+    const txt = el.textContent || '';
+    el.textContent = `${emojiFor(txt)} ${txt}`;
+  });
+})();
+</script>
+{% endblock %}

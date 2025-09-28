@@ -31,6 +31,43 @@
 {% block scripts %}
 <script>
 (function(){
+  // ---------- Emoji helpers (keyword -> icon) ----------
+  const EMOJI_RULES = [
+    { re: /(fire|wildfire|smoke|burning)/i, emoji: "🚒" },
+    { re: /(explosion|blast|bomb)/i, emoji: "💥" },
+    { re: /(shooting|gunshot|shots? fired|active shooter)/i, emoji: "🆘" },
+    { re: /(protest|demonstration|rally|clash|riot|march)/i, emoji: "✊" },
+    { re: /(police|law enforcement|sheriff|federal agents|ICE|border patrol|troops|national guard|military)/i, emoji: "👮" },
+    { re: /(evacuation|evacuate|shelter[- ]?in[- ]?place|lockdown)/i, emoji: "🚨" },
+    { re: /(storm|hurricane|tornado|severe weather|flood|rain|snow|blizzard)/i, emoji: "⛈️" },
+    { re: /(earthquake|seismic|aftershock)/i, emoji: "🌎" },
+    { re: /(power outage|blackout)/i, emoji: "🔌" },
+    { re: /(road closed|closure|traffic|bridge|highway)/i, emoji: "🚧" },
+  ];
+  function emojiFor(text){
+    for(const rule of EMOJI_RULES){
+      if(rule.re.test(text)) return rule.emoji;
+    }
+    return "📝";
+  }
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+  function renderSummary(text){
+    if(!text) return "";
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+    if(!lines.length) return escapeHtml(text);
+    let html = '<ul class="summary-list" style="padding-left:16px;margin:0">';
+    for(const raw of lines){
+      const content = raw.replace(/^\*\s*/, '').trim();
+      const icon = emojiFor(content);
+      html += `<li>${icon} ${escapeHtml(content)}</li>`;
+    }
+    html += '</ul>';
+    return html;
+  }
+
+  // ---------- Existing live-update logic ----------
   const DEPTH_KEY = 'newsmon_depth';
   const form = document.getElementById('searchForm');
   const topicEl = document.getElementById('topic');
@@ -82,10 +119,9 @@
 
     const body = document.createElement('div');
     body.className = 'summary';
-    body.style.whiteSpace = 'pre-wrap';
-    body.style.lineHeight = '1.4';
+    body.style.lineHeight = '1.45';
     body.style.color = 'var(--text)';
-    body.textContent = 'Summarizing…';
+    body.innerHTML = '<span class="muted">Summarizing…</span>';
     card.appendChild(body);
 
     liveList.appendChild(card);
@@ -97,7 +133,7 @@
     const card = cards.get(idx);
     if (!card) return;
     const body = card.querySelector('.summary');
-    if (body) body.textContent = text || '';
+    if (body) body.innerHTML = renderSummary(text || '');
   }
 
   function setProgress(pct){ progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%'; }
@@ -139,7 +175,6 @@
         const data = JSON.parse(ev.data);
         if (typeof data.total === 'number') {
           total = data.total;
-          // show combined processed (prefer summaries; otherwise headlines)
           const processed = data.processed || 0;
           countEl.textContent = `${processed}/${total}`;
         }
@@ -152,7 +187,6 @@
         const d = JSON.parse(ev.data);
         total = d.total || total;
         makeCard(d.idx, d.total, d.title, d.source, d.link, d.date);
-        // progress handled by progress events
       }catch(_){}
     });
 
@@ -160,7 +194,6 @@
       try{
         const d = JSON.parse(ev.data);
         updateSummary(d.idx, d.readable || '');
-        // progress handled by progress events
       }catch(_){}
     });
 
