@@ -1,28 +1,46 @@
-# app.py
-from llama_utils import setup_client, async_ask_model
-from dotenv import load_dotenv
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from dotenv import load_dotenv
 import feedparser
-import asyncio
-import json
 import time
 import os
-
+import json
+from llama_utils import async_ask_model
 from tracker import EventTracker  # NEW
 
 load_dotenv()
 URL = os.environ.get('URL')
 
 GOOGLE_SEARCH_BASE = 'https://news.google.com/rss/search?'
+def ensure_topic_dir(topic: str) -> str:
+    out_dir = topic.lower().strip().replace(' ', '_').replace('/', '_')
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    return out_dir
 
-def check_google_rss(query, time_span):
-    """
-    Pull Google News RSS for `query` within `time_span` (e.g., 24h).
+
+def load_pre_prompt():
+    with open(os.path.join('prompts','news_prepper.txt'),'r') as f:
+        result = f.read()
+    f.close()
+    return result
+
+def save_raw_stories(parsed_feeds, topic):
+    out_dir = ensure_topic_dir(topic)
+    t = datetime.fromtimestamp(time.time())
+    timestamp = f'{t.month:02d}{t.day:02d}{t.year:04d}_{t.hour:02d}{t.minute:02d}{t.second:02d}'
+    file_out = os.path.join(out_dir, f'data_{timestamp}.json')
+    with open(file_out, 'w', encoding='utf-8') as f:
+        f.write(json.dumps(parsed_feeds, indent=2, ensure_ascii=False))
+    print(f'[+] Data saved to {file_out}')
+
+def check_google_rss(query, time_span, depth: int = 100):
+    """Pull Google News RSS for `query` within `time_span` (e.g., 24h).
     Returns list of dicts with fields expected by downstream code.
     """
+    depth = max(1, int(depth or 100))
     result = []
-    feed = feedparser.parse(f'{GOOGLE_SEARCH_BASE}q={query.replace(" ","+")}+when:{time_span}')
+    feed = feedparser.parse(f'{GOOGLE_SEARCH_BASE}q={query.replace(" ", "+")}+when:{time_span}')
     for entry in feed.get('entries', []):
         title = entry.get('title')
         link = entry.get('link')
@@ -53,22 +71,9 @@ def check_google_rss(query, time_span):
             'date': tlabel,
             'ts': ts
         })
+        if len(result) >= depth:
+            break
     return result
-
-def ensure_topic_dir(topic):
-    out_dir = topic.lower().replace(' ','')
-    if not os.path.isdir(out_dir):
-        os.mkdir(out_dir)
-    return out_dir
-
-def save_raw_stories(parsed_feeds, topic):
-    out_dir = ensure_topic_dir(topic)  # FIX: use out_dir, not topic
-    t = datetime.fromtimestamp(time.time())
-    timestamp = f'{t.month:02d}{t.day:02d}{t.year:04d}_{t.hour:02d}{t.minute:02d}{t.second:02d}'
-    file_out = os.path.join(out_dir, f'data_{timestamp}.json')
-    with open(file_out, 'w', encoding='utf-8') as f:
-        f.write(json.dumps(parsed_feeds, indent=2, ensure_ascii=False))
-    print(f'[+] Data saved to {file_out}')
 
 async def summarize_story(host, event, model, pre_prompt):
     query = f'{pre_prompt}\n```json\n{json.dumps(event, indent=2)}\n```\n'
@@ -185,6 +190,3 @@ async def main():
     with open(snapshot_path, "w", encoding="utf-8") as f:
         f.write(json.dumps(all_clusters, indent=2, ensure_ascii=False))
     print(f"[+] Cluster snapshot saved to {snapshot_path}")
-
-if __name__ == '__main__':
-    asyncio.run(main())

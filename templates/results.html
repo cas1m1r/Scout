@@ -17,7 +17,7 @@
             <span class="status-badge status-{{ alert.status }}">{{ alert.status }}</span>
             <span class="score">Score: {{ alert.score }}</span>
         </div>
-        <div style="font-size: 0.9rem; color: #666;">
+        <div class="muted" style="font-size: 0.9rem;">
             Sources: {{ alert.domains|join(', ') }} | Stories: {{ alert.count }} | Latest: {{ alert.last_seen_gmt }}
         </div>
     </div>
@@ -35,7 +35,7 @@
             <span class="status-badge status-{{ cluster.status }}">{{ cluster.status }}</span>
             <span class="score">Score: {{ cluster.score }}</span>
         </div>
-        <div style="font-size: 0.9rem; color: #666;">
+        <div class="muted" style="font-size: 0.9rem;">
             Sources: {{ cluster.domains|join(', ') }} | Stories: {{ cluster.count }} | Latest: {{ cluster.last_seen_gmt }}
         </div>
     </div>

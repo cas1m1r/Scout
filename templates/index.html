@@ -1,149 +1,140 @@
 {% extends "base.html" %}
 {% block title %}Home{% endblock %}
+
 {% block content %}
 <div class="card">
-    <h2>🔍 Start New Search</h2>
-    <p>Enter a topic to search for and analyze recent news stories:</p>
-    <form id="searchForm">
-        <div class="form-group">
-            <label for="topic">Search Topic:</label>
-            <input type="text" id="topic" name="topic" placeholder="e.g., ICE protest, climate change, election" required>
-        </div>
-        <button type="submit" class="btn">Start Search</button>
-    </form>
+  <label for="topic">Start New Search</label>
+  <form id="searchForm">
+    <input id="topic" name="topic" type="text" placeholder="Enter a topic (e.g., ICE protest, Portland)" required />
+    <div style="display:flex; gap:10px; margin-top:12px; align-items:center;">
+      <button class="btn" type="submit">Start</button>
+      <span class="chip">Depth uses slider in header</span>
+    </div>
+  </form>
 </div>
-<div id="searchProgress" style="display: none;" class="card">
-    <h3>Search Progress</h3>
-    <div id="statusText">Initializing...</div>
-    <div class="progress-container">
-        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
-    </div>
-    <div id="progressDetails"></div>
 
-    <!-- Live findings -->
-    <div style="margin-top: 16px;">
-      <h4>Live findings</h4>
-      <div id="liveFeed"></div>
-    </div>
+<div class="card">
+  <h3 style="margin-bottom:10px;">Search Progress</h3>
+  <div class="progress-container"><div id="progressBar" class="progress-bar"></div></div>
+  <div style="display:flex; gap:12px; font-weight:600; color:var(--muted);">
+    <div>Articles: <span id="count">0</span></div>
+    <div>Time: <span id="elapsed">0s</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom:10px;">Live findings</h3>
+  <div id="liveList"></div>
 </div>
 {% endblock %}
+
 {% block scripts %}
 <script>
-let es = null;
+(function(){
+  const DEPTH_KEY = 'newsmon_depth';
+  const form = document.getElementById('searchForm');
+  const topicEl = document.getElementById('topic');
+  const progressBar = document.getElementById('progressBar');
+  const countEl = document.getElementById('count');
+  const liveList = document.getElementById('liveList');
+  const elapsedEl = document.getElementById('elapsed');
 
-document.getElementById('searchForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const topic = document.getElementById('topic').value.trim();
-    if (!topic) return;
-    document.getElementById('searchProgress').style.display = 'block';
-    document.getElementById('searchForm').style.display = 'none';
-    fetch('/start_search', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: 'topic=' + encodeURIComponent(topic)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) { alert('Error: ' + data.error); return; }
-        // Start SSE stream
-        openStream(data.search_id);
-        // Fallback polling
-        pollStatus(data.search_id);
-    })
-    .catch(error => { console.error('Error:', error); alert('Search failed: ' + error); });
-});
+  let startTime = 0;
+  let timer = null;
 
-function openStream(searchId) {
-  if (!!window.EventSource) {
-    es = new EventSource('/stream/' + searchId);
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'status') {
-          updateProgress({
-            status: msg.status || 'processing',
-            progress: msg.progress || 0,
-            total_articles: msg.total || 0,
-            processed_articles: msg.processed || 0,
-            elapsed_time: null
-          });
-        } else if (msg.type === 'story') {
-          appendLiveCard(msg);
-          updateProgress({
-            status: 'processing_articles',
-            progress: Math.max(parseFloat(document.getElementById('progressBar').style.width) || 0,
-                               20 + (60 * (msg.index / (msg.total || 1)))),
-            total_articles: msg.total || 0,
-            processed_articles: msg.index || 0,
-            elapsed_time: null
-          });
-        } else if (msg.type === 'done') {
-          if (es) es.close();
-          window.location.href = '/view_results/' + searchId;
-        }
-      } catch (err) {
-        console.log('Stream parse error:', err, e.data);
-      }
-    };
-    es.onerror = () => {
-      if (es) es.close();
-    };
-  } else {
-    console.log('EventSource not supported; relying on polling.');
+  function sec(){ return Math.floor((Date.now() - startTime)/1000); }
+  function startTimer(){
+    startTime = Date.now();
+    timer = setInterval(()=>{ elapsedEl.textContent = sec() + 's'; }, 1000);
   }
-}
+  function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
 
-function pollStatus(searchId) {
-    const poll = () => {
-        fetch('/search_status/' + searchId)
-        .then(response => response.json())
-        .then(data => {
-            updateProgress(data);
-            if (data.status === 'completed') {
-                window.location.href = '/view_results/' + searchId;
-            } else if (data.status === 'error') {
-                alert('Search failed: ' + data.error);
-                document.getElementById('searchForm').style.display = 'block';
-                document.getElementById('searchProgress').style.display = 'none';
-            } else {
-                setTimeout(poll, 2500);
-            }
-        })
-        .catch(error => { console.error('Polling error:', error); setTimeout(poll, 5000); });
+  function renderStory(msg){
+    const wrapper = document.createElement('div');
+    wrapper.style.border = '1px solid var(--border)';
+    wrapper.style.borderRadius = '12px';
+    wrapper.style.padding = '12px';
+    wrapper.style.marginBottom = '10px';
+
+    const h = document.createElement('div');
+    h.style.fontWeight = '800';
+    h.style.marginBottom = '6px';
+    h.textContent = `${msg.index}/${msg.total} · ${msg.title} ${msg.source ? ' - ' + msg.source : ''}`;
+    wrapper.appendChild(h);
+
+    const body = document.createElement('div');
+    body.style.whiteSpace = 'pre-wrap';
+    body.style.lineHeight = '1.4';
+    body.style.color = 'var(--text)';
+    body.textContent = (msg.readable || ''); // already concise
+    wrapper.appendChild(body);
+
+    liveList.appendChild(wrapper);
+  }
+
+  function setProgress(pct){
+    progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    liveList.innerHTML = '';
+    setProgress(0);
+    countEl.textContent = '0';
+    elapsedEl.textContent = '0s';
+
+    const formData = new FormData();
+    formData.append('topic', topicEl.value || '');
+    formData.append('depth', localStorage.getItem(DEPTH_KEY) || '100');
+
+    const res = await fetch('/start_search', { method:'POST', body: formData });
+    const j = await res.json();
+    if (!j.search_id){
+      alert(j.error || 'Failed to start search');
+      return;
+    }
+
+    const sid = j.search_id;
+    startTimer();
+
+    const es = new EventSource(`/stream/${sid}`);
+    es.addEventListener('status', (ev) => {
+      try{
+        const data = JSON.parse(ev.data);
+        if (typeof data.progress === 'number') setProgress(data.progress);
+      }catch(_){}
+    });
+    es.addEventListener('progress', (ev) => {
+      try{
+        const data = JSON.parse(ev.data);
+        if (typeof data.total === 'number') countEl.textContent = `${data.processed}/${data.total}`;
+        const pct = data.total ? (data.processed / data.total) * 80 + 20 : 0;
+        setProgress(pct);
+      }catch(_){}
+    });
+    es.addEventListener('story', (ev) => {
+      try{
+        const data = JSON.parse(ev.data);
+        renderStory(data);
+      }catch(_){}
+    });
+    es.addEventListener('done', (ev) => {
+      stopTimer();
+      setProgress(100);
+      const link = document.createElement('a');
+      link.href = `/view_results/${sid}`;
+      link.className = 'btn';
+      link.style.display = 'inline-block';
+      link.style.marginTop = '10px';
+      link.textContent = 'View Results';
+      liveList.appendChild(link);
+      es.close();
+    });
+    es.onerror = () => {
+      stopTimer();
+      es.close();
     };
-    poll();
-}
-
-function appendLiveCard(msg) {
-  const feed = document.getElementById('liveFeed');
-  const card = document.createElement('div');
-  card.className = 'story-item';
-  card.style.border = '1px solid #eee';
-  card.style.borderRadius = '12px';
-  card.style.padding = '10px';
-  card.style.marginBottom = '10px';
-  card.innerHTML = `
-    <div class="story-title" style="font-weight:600">${escapeHtml(msg.title || '')}</div>
-    <div class="story-source" style="color:#666; font-size:0.9rem">${msg.source ? escapeHtml(msg.source) : ''}</div>
-    <div style="margin-top:8px; font-size:0.95rem; color:#333;">${escapeHtml(msg.readable || '')}</div>
-  `;
-  if (feed.firstChild) feed.insertBefore(card, feed.firstChild); else feed.appendChild(card);
-  while (feed.childElementCount > 12) feed.lastChild.remove();
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, function(c) {
-    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
-}
-
-function updateProgress(data) {
-    document.getElementById('statusText').textContent = (data.status || '').replace(/_/g, ' ').toUpperCase();
-    document.getElementById('progressBar').style.width = (data.progress || 0) + '%';
-    let details = '';
-    if (data.total_articles > 0) { details += `Articles: ${data.processed_articles}/${data.total_articles} `; }
-    if (data.elapsed_time) { details += `Time: ${Math.round(data.elapsed_time)}s`; }
-    document.getElementById('progressDetails').textContent = details;
-}
+})();
 </script>
 {% endblock %}
