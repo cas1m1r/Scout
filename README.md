@@ -298,23 +298,6 @@ Typical performance on modest hardware:
 | Storage growth | ~1MB per 100 articles |
 | Response time | 1-3 seconds per article |
 
-## 🗺️ Roadmap
-
-### Version 2.0 (Planned)
-- [ ] Multi-language support
-- [ ] Sentiment analysis integration
-- [ ] Image/video content analysis
-- [ ] Social media monitoring
-- [ ] Advanced visualization charts
-- [ ] Slack/Discord bot integration
-
-### Version 1.5 (In Progress)
-- [ ] Docker deployment
-- [ ] Background task scheduler
-- [ ] Enhanced mobile interface
-- [ ] Batch processing modes
-- [ ] Configuration web UI
-
 ## 📄 License
 
 This project is released under the MIT License. See [LICENSE](LICENSE) for details.
