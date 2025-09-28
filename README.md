@@ -76,7 +76,7 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 
 6. **Run the application**
    ```bash
-   python app.py
+   python flask_news_frontend.py
    ```
 
 7. **Open your browser**
@@ -88,7 +88,7 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 
 ```
 news-monitor/
-├── 📄 app.py                 # Main Flask web application
+├── 📄 flask_news_frontend.py # Main Flask web application
 ├── 🧠 llama_utils.py         # Ollama/LLM integration utilities
 ├── 📰 main.py               # Core news processing logic
 ├── 📊 tracker.py            # Event clustering and tracking system
@@ -269,9 +269,8 @@ We welcome contributions! Here are some areas where help is needed:
 - Advanced clustering algorithms (semantic similarity)
 - Email/SMS alerting system
 - Mobile-responsive improvements
-- Database backend options (PostgreSQL, MongoDB)
+- Database backend 
 - Docker containerization
-- Kubernetes deployment manifests
 
 ### 🐛 **Bug Reports**
 Please include:
@@ -281,21 +280,9 @@ Please include:
 - Steps to reproduce
 
 ### 📝 **Documentation**
-- Tutorial videos
 - Use case examples
 - API documentation
 - Deployment guides
-
-## 📊 Performance Metrics
-
-Typical performance on modest hardware:
-
-| Metric | Value |
-|--------|-------|
-| Articles/minute | 10-15 (with gemma2:2b) |
-| Memory usage | 2-4GB (depending on model) |
-| Storage growth | ~1MB per 100 articles |
-| Response time | 1-3 seconds per article |
 
 ## 📄 License
 
