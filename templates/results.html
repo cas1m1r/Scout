@@ -42,4 +42,53 @@
     {% endfor %}
 </div>
 {% endif %}
+
+{% if second_stage %}
+<h2 class="section-title">Second-stage Analysis</h2>
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Priority</th>
+          <th>Cluster ID</th>
+          <th>Status</th>
+          <th>Score</th>
+          <th>Freshness</th>
+          <th>Corrob.</th>
+          <th>Max Count</th>
+          <th>Momentum/hr</th>
+          <th>Runs</th>
+          <th>Topline</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in second_stage %}
+        <tr>
+          <td>{{ '%.2f'|format(r.priority or 0) }}</td>
+          <td>
+            <code>{{ r.cluster_id }}</code>
+            {% if r.topic_group %}<span class="badge">{{ r.topic_group }}</span>{% endif %}
+            {% if r.corroborated_flag %}<span class="badge badge-ok">corroborated</span>{% endif %}
+            {% if r.murky_flag %}<span class="badge badge-warn">murky</span>{% endif %}
+          </td>
+          <td>{{ r.status_latest }}</td>
+          <td>{{ r.last_score }}</td>
+          <td>{{ r.freshness_latest }}</td>
+          <td>{{ r.corroboration_latest }}</td>
+          <td>{{ r.max_count }}</td>
+          <td>{{ r.momentum_per_hr }}</td>
+          <td>{{ r.runs }}</td>
+          <td>{{ r.primary_title_latest }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+
 {% endblock %}
+
+

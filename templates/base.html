@@ -5,7 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>News Monitor - {% block title %}Dashboard{% endblock %}</title>
   <style>
+    /* Put near the top of your <style> in base.html */
+
+
+    /* If you’re using data-theme toggling */
+    html[data-theme="dark"] {
+      --link: #8ab4f8;
+      --link-hover: #a1c2ff;
+      --link-visited: #c58af9;
+    }
+
+    /* Global link styles (does NOT affect .nav a which already sets color: white) */
+    a { color: var(--link); }
+    a:hover { color: var(--link-hover); }
+    a:visited { color: var(--link-visited); }
+
+    /* Optional: make story titles tidy */
+    .story-title a { text-decoration: none; }
+    .story-title a:hover { text-decoration: underline; }
+
+    /* If your live list uses a class, you can be explicit too */
+    .live-list a { color: var(--link); }
+
     :root {
+      --link: #1e3c72;
+      --link-hover: #2a5298;
+      --link-visited: #6b21a8;
       --bg: #f0f3f9;
       --panel: rgba(255,255,255,0.95);
       --text: #0f172a;
@@ -19,7 +44,7 @@
     body.dark, html[data-theme="dark"] {
       --bg: #0b1220;
       --panel: #0e1626;
-      --text: #e5e7eb;
+      --text: #13eef0;
       --muted: #94a3b8;
       --primary: #60a5fa;
       --primary-2: #3b82f6;
@@ -85,7 +110,7 @@
       border: 2px solid var(--border);
       background: transparent; color: var(--text);
     }
-    input[type="text"]:focus{ outline:none; border-color: var(--primary-2); }
+    input[type="text"]:focus{ outline:none; border-color: var(--primary-2); color: #13eef0;}
     .progress-container{ background: var(--progress-bg); border-radius:10px; overflow:hidden; margin: 10px 0 20px; height:18px; }
     .progress-bar { background: linear-gradient(45deg, var(--primary), var(--primary-2)); height:100%; width:0%; transition: width .25s ease; }
     .story-source { color: var(--muted); font-size:.9rem; }

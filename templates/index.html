@@ -39,47 +39,75 @@
   const liveList = document.getElementById('liveList');
   const elapsedEl = document.getElementById('elapsed');
 
-  let startTime = 0;
-  let timer = null;
+  let startTime = 0, timer = null;
+  let total = 0;
 
   function sec(){ return Math.floor((Date.now() - startTime)/1000); }
-  function startTimer(){
-    startTime = Date.now();
-    timer = setInterval(()=>{ elapsedEl.textContent = sec() + 's'; }, 1000);
-  }
+  function startTimer(){ startTime = Date.now(); timer = setInterval(()=>{ elapsedEl.textContent = sec() + 's'; }, 1000); }
   function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
 
-  function renderStory(msg){
-    const wrapper = document.createElement('div');
-    wrapper.style.border = '1px solid var(--border)';
-    wrapper.style.borderRadius = '12px';
-    wrapper.style.padding = '12px';
-    wrapper.style.marginBottom = '10px';
+  // card registry by idx so we can update with summaries
+  const cards = new Map();
+
+  function makeCard(idx, total, title, source, link, date){
+    const card = document.createElement('div');
+    card.dataset.idx = String(idx);
+    card.style.border = '1px solid var(--border)';
+    card.style.borderRadius = '12px';
+    card.style.padding = '12px';
+    card.style.marginBottom = '10px';
 
     const h = document.createElement('div');
     h.style.fontWeight = '800';
     h.style.marginBottom = '6px';
-    h.textContent = `${msg.index}/${msg.total} · ${msg.title} ${msg.source ? ' - ' + msg.source : ''}`;
-    wrapper.appendChild(h);
+    const a = document.createElement('a');
+    a.href = link || '#';
+    a.target = '_blank';
+    a.textContent = title || '(no title)';
+    h.textContent = `${idx}/${total} · `;
+    h.appendChild(a);
+    if (source) {
+      const src = document.createElement('span');
+      src.className = 'story-source';
+      src.textContent = ` — ${source}`;
+      h.appendChild(src);
+    }
+    card.appendChild(h);
+
+    const sub = document.createElement('div');
+    sub.className = 'story-source';
+    sub.style.marginBottom = '4px';
+    if (date) sub.textContent = date;
+    card.appendChild(sub);
 
     const body = document.createElement('div');
+    body.className = 'summary';
     body.style.whiteSpace = 'pre-wrap';
     body.style.lineHeight = '1.4';
     body.style.color = 'var(--text)';
-    body.textContent = (msg.readable || ''); // already concise
-    wrapper.appendChild(body);
+    body.textContent = 'Summarizing…';
+    card.appendChild(body);
 
-    liveList.appendChild(wrapper);
+    liveList.appendChild(card);
+    cards.set(idx, card);
+    return card;
   }
 
-  function setProgress(pct){
-    progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  function updateSummary(idx, text){
+    const card = cards.get(idx);
+    if (!card) return;
+    const body = card.querySelector('.summary');
+    if (body) body.textContent = text || '';
   }
+
+  function setProgress(pct){ progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%'; }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     liveList.innerHTML = '';
+    cards.clear();
     setProgress(0);
+    total = 0;
     countEl.textContent = '0';
     elapsedEl.textContent = '0s';
 
@@ -98,27 +126,54 @@
     startTimer();
 
     const es = new EventSource(`/stream/${sid}`);
+
     es.addEventListener('status', (ev) => {
       try{
         const data = JSON.parse(ev.data);
         if (typeof data.progress === 'number') setProgress(data.progress);
       }catch(_){}
     });
+
     es.addEventListener('progress', (ev) => {
       try{
         const data = JSON.parse(ev.data);
-        if (typeof data.total === 'number') countEl.textContent = `${data.processed}/${data.total}`;
-        const pct = data.total ? (data.processed / data.total) * 80 + 20 : 0;
-        setProgress(pct);
+        if (typeof data.total === 'number') {
+          total = data.total;
+          // show combined processed (prefer summaries; otherwise headlines)
+          const processed = data.processed || 0;
+          countEl.textContent = `${processed}/${total}`;
+        }
+        if (typeof data.progress === 'number') setProgress(data.progress);
       }catch(_){}
     });
+
+    es.addEventListener('headline', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        total = d.total || total;
+        makeCard(d.idx, d.total, d.title, d.source, d.link, d.date);
+        // progress handled by progress events
+      }catch(_){}
+    });
+
+    es.addEventListener('summary', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        updateSummary(d.idx, d.readable || '');
+        // progress handled by progress events
+      }catch(_){}
+    });
+
+    // backwards compat if server ever emits a single 'story' event
     es.addEventListener('story', (ev) => {
       try{
-        const data = JSON.parse(ev.data);
-        renderStory(data);
+        const d = JSON.parse(ev.data);
+        if (!cards.has(d.index)) makeCard(d.index, d.total, d.title, d.source, d.link, d.date);
+        updateSummary(d.index, d.readable || '');
       }catch(_){}
     });
-    es.addEventListener('done', (ev) => {
+
+    es.addEventListener('done', () => {
       stopTimer();
       setProgress(100);
       const link = document.createElement('a');
@@ -130,10 +185,11 @@
       liveList.appendChild(link);
       es.close();
     });
-    es.onerror = () => {
+
+    es.addEventListener('error', () => {
       stopTimer();
       es.close();
-    };
+    });
   });
 })();
 </script>
