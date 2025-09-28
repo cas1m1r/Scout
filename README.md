@@ -57,29 +57,24 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
    pip install -r requirements.txt
    ```
 
-3. **Set up templates**
-   ```bash
-   python template_setup.py
-   ```
-
-4. **Configure environment**
+3. **Configure environment**
    ```bash
    cp .env.template .env
    # Edit .env with your settings
    ```
 
-5. **Start Ollama and pull a model**
+4. **Start Ollama and pull a model**
    ```bash
    ollama serve
    ollama pull gemma2:2b  # or your preferred model
    ```
 
-6. **Run the application**
+5. **Run the application**
    ```bash
    python flask_news_frontend.py
    ```
 
-7. **Open your browser**
+6. **Open your browser**
    ```
    http://localhost:5000
    ```
@@ -87,7 +82,7 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 ## 📁 Project Structure
 
 ```
-news-monitor/
+Scout/
 ├── 📄 flask_news_frontend.py # Main Flask web application
 ├── 🧠 llama_utils.py         # Ollama/LLM integration utilities
 ├── 📰 main.py               # Core news processing logic
