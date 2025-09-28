@@ -12,7 +12,7 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 ### 🔍 **Smart News Discovery**
 - Real-time Google News RSS feed monitoring
 - Custom search topics with 24-hour lookback
-- Automatic story deduplication and clustering
+- Automatic story deduplication and clustering (IN PROGRESS)
 
 ### 🤖 **AI-Powered Analysis**
 - Local LLM integration via Ollama (privacy-first)
@@ -23,19 +23,18 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 ### 📊 **Advanced Event Tracking**
 - Multi-story event clustering with similarity scoring
 - Freshness, specificity, and impact scoring
-- Cross-source corroboration validation
-- Alert cooldown system to prevent spam
+- Cross-source corroboration validation (TODO)
+- Alert cooldown system to prevent spam (TODO)
 
 ### 🌐 **Modern Web Interface**
-- Beautiful, responsive Flask web application
+- Responsive Flask web application
 - Real-time search progress with live updates
-- Interactive dashboards for event monitoring
-- Historical data browser and export functionality
+- Interactive dashboards for event monitoring (TODO)
 
 ### 🚨 **Intelligent Alerting**
-- Configurable scoring thresholds
-- High-priority event highlighting
-- Timeline tracking with persistent storage
+- Configurable scoring thresholds (TODO)
+- High-priority event highlighting  
+- Timeline tracking with persistent storage (TODO)
 - Status-based alert triggers
 
 ## 🚀 Quick Start
