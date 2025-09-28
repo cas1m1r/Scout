@@ -19,10 +19,18 @@
         <div id="progressBar" class="progress-bar" style="width: 0%"></div>
     </div>
     <div id="progressDetails"></div>
+
+    <!-- Live findings -->
+    <div style="margin-top: 16px;">
+      <h4>Live findings</h4>
+      <div id="liveFeed"></div>
+    </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
+let es = null;
+
 document.getElementById('searchForm').addEventListener('submit', function(e) {
     e.preventDefault();
     const topic = document.getElementById('topic').value.trim();
@@ -37,10 +45,53 @@ document.getElementById('searchForm').addEventListener('submit', function(e) {
     .then(response => response.json())
     .then(data => {
         if (data.error) { alert('Error: ' + data.error); return; }
+        // Start SSE stream
+        openStream(data.search_id);
+        // Fallback polling
         pollStatus(data.search_id);
     })
     .catch(error => { console.error('Error:', error); alert('Search failed: ' + error); });
 });
+
+function openStream(searchId) {
+  if (!!window.EventSource) {
+    es = new EventSource('/stream/' + searchId);
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'status') {
+          updateProgress({
+            status: msg.status || 'processing',
+            progress: msg.progress || 0,
+            total_articles: msg.total || 0,
+            processed_articles: msg.processed || 0,
+            elapsed_time: null
+          });
+        } else if (msg.type === 'story') {
+          appendLiveCard(msg);
+          updateProgress({
+            status: 'processing_articles',
+            progress: Math.max(parseFloat(document.getElementById('progressBar').style.width) || 0,
+                               20 + (60 * (msg.index / (msg.total || 1)))),
+            total_articles: msg.total || 0,
+            processed_articles: msg.index || 0,
+            elapsed_time: null
+          });
+        } else if (msg.type === 'done') {
+          if (es) es.close();
+          window.location.href = '/view_results/' + searchId;
+        }
+      } catch (err) {
+        console.log('Stream parse error:', err, e.data);
+      }
+    };
+    es.onerror = () => {
+      if (es) es.close();
+    };
+  } else {
+    console.log('EventSource not supported; relying on polling.');
+  }
+}
 
 function pollStatus(searchId) {
     const poll = () => {
@@ -55,7 +106,7 @@ function pollStatus(searchId) {
                 document.getElementById('searchForm').style.display = 'block';
                 document.getElementById('searchProgress').style.display = 'none';
             } else {
-                setTimeout(poll, 2000);
+                setTimeout(poll, 2500);
             }
         })
         .catch(error => { console.error('Polling error:', error); setTimeout(poll, 5000); });
@@ -63,9 +114,32 @@ function pollStatus(searchId) {
     poll();
 }
 
+function appendLiveCard(msg) {
+  const feed = document.getElementById('liveFeed');
+  const card = document.createElement('div');
+  card.className = 'story-item';
+  card.style.border = '1px solid #eee';
+  card.style.borderRadius = '12px';
+  card.style.padding = '10px';
+  card.style.marginBottom = '10px';
+  card.innerHTML = `
+    <div class="story-title" style="font-weight:600">${escapeHtml(msg.title || '')}</div>
+    <div class="story-source" style="color:#666; font-size:0.9rem">${msg.source ? escapeHtml(msg.source) : ''}</div>
+    <div style="margin-top:8px; font-size:0.95rem; color:#333;">${escapeHtml(msg.readable || '')}</div>
+  `;
+  if (feed.firstChild) feed.insertBefore(card, feed.firstChild); else feed.appendChild(card);
+  while (feed.childElementCount > 12) feed.lastChild.remove();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
 function updateProgress(data) {
-    document.getElementById('statusText').textContent = data.status.replace(/_/g, ' ').toUpperCase();
-    document.getElementById('progressBar').style.width = data.progress + '%';
+    document.getElementById('statusText').textContent = (data.status || '').replace(/_/g, ' ').toUpperCase();
+    document.getElementById('progressBar').style.width = (data.progress || 0) + '%';
     let details = '';
     if (data.total_articles > 0) { details += `Articles: ${data.processed_articles}/${data.total_articles} `; }
     if (data.elapsed_time) { details += `Time: ${Math.round(data.elapsed_time)}s`; }
