@@ -48,7 +48,7 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/news-monitor.git
+   git clone https://github.com/cas1m1r/Scout.git
    cd news-monitor
    ```
 
