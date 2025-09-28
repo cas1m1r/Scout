@@ -48,7 +48,7 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/news-monitor.git
+   git clone https://github.com/cas1m1r/Scout.git
    cd news-monitor
    ```
 
@@ -57,29 +57,24 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
    pip install -r requirements.txt
    ```
 
-3. **Set up templates**
-   ```bash
-   python template_setup.py
-   ```
-
-4. **Configure environment**
+3. **Configure environment**
    ```bash
    cp .env.template .env
    # Edit .env with your settings
    ```
 
-5. **Start Ollama and pull a model**
+4. **Start Ollama and pull a model**
    ```bash
    ollama serve
    ollama pull gemma2:2b  # or your preferred model
    ```
 
-6. **Run the application**
+5. **Run the application**
    ```bash
-   python app.py
+   python flask_news_frontend.py
    ```
 
-7. **Open your browser**
+6. **Open your browser**
    ```
    http://localhost:5000
    ```
@@ -87,8 +82,8 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 ## 📁 Project Structure
 
 ```
-news-monitor/
-├── 📄 app.py                 # Main Flask web application
+Scout/
+├── 📄 flask_news_frontend.py # Main Flask web application
 ├── 🧠 llama_utils.py         # Ollama/LLM integration utilities
 ├── 📰 main.py               # Core news processing logic
 ├── 📊 tracker.py            # Event clustering and tracking system
@@ -269,9 +264,8 @@ We welcome contributions! Here are some areas where help is needed:
 - Advanced clustering algorithms (semantic similarity)
 - Email/SMS alerting system
 - Mobile-responsive improvements
-- Database backend options (PostgreSQL, MongoDB)
+- Database backend 
 - Docker containerization
-- Kubernetes deployment manifests
 
 ### 🐛 **Bug Reports**
 Please include:
@@ -281,21 +275,9 @@ Please include:
 - Steps to reproduce
 
 ### 📝 **Documentation**
-- Tutorial videos
 - Use case examples
 - API documentation
 - Deployment guides
-
-## 📊 Performance Metrics
-
-Typical performance on modest hardware:
-
-| Metric | Value |
-|--------|-------|
-| Articles/minute | 10-15 (with gemma2:2b) |
-| Memory usage | 2-4GB (depending on model) |
-| Storage growth | ~1MB per 100 articles |
-| Response time | 1-3 seconds per article |
 
 ## 📄 License
 
