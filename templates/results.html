@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Results for {{ topic }}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>🎯 Search Results: {{ topic }}</h2>
+    <a href="/" class="btn">← Start New Search</a>
+</div>
+{% if results.alerts %}
+<div class="card alert-card">
+    <h3>🚨 Alerts ({{ results.alerts|length }})</h3>
+    <p>High-priority events requiring attention:</p>
+    {% for alert in results.alerts %}
+    <div class="story-item">
+        <div class="story-title">{{ alert.primary_title }}</div>
+        <div class="story-source"><a href="{{ alert.primary_link }}" target="_blank">{{ alert.primary_link }}</a></div>
+        <div style="margin: 10px 0;">
+            <span class="status-badge status-{{ alert.status }}">{{ alert.status }}</span>
+            <span class="score">Score: {{ alert.score }}</span>
+        </div>
+        <div style="font-size: 0.9rem; color: #666;">
+            Sources: {{ alert.domains|join(', ') }} | Stories: {{ alert.count }} | Latest: {{ alert.last_seen_gmt }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% if results.clusters %}
+<div class="card cluster-card">
+    <h3>📊 All Clusters ({{ results.clusters|length }})</h3>
+    {% for cluster in results.clusters %}
+    <div class="story-item">
+        <div class="story-title">{{ cluster.primary_title }}</div>
+        <div class="story-source"><a href="{{ cluster.primary_link }}" target="_blank">{{ cluster.primary_link }}</a></div>
+        <div style="margin: 10px 0;">
+            <span class="status-badge status-{{ cluster.status }}">{{ cluster.status }}</span>
+            <span class="score">Score: {{ cluster.score }}</span>
+        </div>
+        <div style="font-size: 0.9rem; color: #666;">
+            Sources: {{ cluster.domains|join(', ') }} | Stories: {{ cluster.count }} | Latest: {{ cluster.last_seen_gmt }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

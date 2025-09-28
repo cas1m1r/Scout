@@ -1,0 +1,5 @@
+Flask
+feedparser
+python-dotenv
+ollama
+websocket-client

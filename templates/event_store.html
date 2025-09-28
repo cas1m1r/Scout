@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Event Store{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>📊 Event Store Analysis</h2>
+    <p>Historical tracking data from the event tracker system:</p>
+</div>
+{% if clusters %}
+<div class="card">
+    <h3>🎯 Tracked Event Clusters ({{ clusters|length }})</h3>
+    {% for cluster in clusters %}
+    <div class="story-item">
+        <div class="story-title">{{ cluster.primary_title }}</div>
+        <div class="story-source"><a href="{{ cluster.primary_link }}" target="_blank">{{ cluster.primary_link }}</a></div>
+        <div style="margin: 10px 0;">
+            <span class="status-badge status-{{ cluster.status }}">{{ cluster.status }}</span>
+            <span class="score">Score: {{ cluster.score }}</span>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card"><p>No event store data found. Run some searches to populate the tracker!</p></div>
+{% endif %}
+{% endblock %}

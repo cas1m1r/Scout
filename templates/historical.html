@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Historical Data{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>📁 Historical Topics</h2>
+    <p>Browse previously searched topics and their data:</p>
+</div>
+{% if topics %}
+{% for topic in topics %}
+<div class="card">
+    <h3><a href="/view_topic/{{ topic.name }}" style="text-decoration: none; color: #1e3c72;">📊 {{ topic.name }}</a></h3>
+    <div style="color: #666; margin: 10px 0;">
+        Data files: {{ topic.data_files }} | Cluster files: {{ topic.cluster_files }}
+    </div>
+    <a href="/view_topic/{{ topic.name }}" class="btn">View Details</a>
+</div>
+{% endfor %}
+{% else %}
+<div class="card"><p>No historical data found. Run some searches first!</p></div>
+{% endif %}
+{% endblock %}

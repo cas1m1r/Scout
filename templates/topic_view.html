@@ -1,0 +1,22 @@
+<!-- templates/topic_view.html -->
+{% extends "base.html" %}
+{% block title %}Topic: {{ topic }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>📁 Topic: {{ topic }}</h2>
+  {% if latest_data %}
+    <h3>Latest Data Snapshot</h3>
+    <pre style="white-space: pre-wrap">{{ latest_data | tojson(indent=2) }}</pre>
+  {% else %}
+    <p>No data snapshots yet.</p>
+  {% endif %}
+
+  {% if latest_clusters %}
+    <h3 style="margin-top:20px">Latest Cluster Snapshot</h3>
+    <pre style="white-space: pre-wrap">{{ latest_clusters | tojson(indent=2) }}</pre>
+  {% else %}
+    <p>No cluster snapshots yet.</p>
+  {% endif %}
+  <a href="/historical_data" class="btn" style="margin-top: 16px">← Back</a>
+</div>
+{% endblock %}

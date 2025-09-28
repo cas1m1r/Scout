@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News Monitor - {% block title %}Dashboard{% endblock %}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: #333; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1); text-align: center; }
+        .header h1 { color: #1e3c72; margin-bottom: 10px; font-size: 2.5rem; font-weight: 700; }
+        .header p { color: #666; font-size: 1.1rem; }
+        .nav { display: flex; gap: 15px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+        .nav a { background: #1e3c72; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; transition: all 0.3s ease; font-weight: 500; }
+        .nav a:hover { background: #2a5298; transform: translateY(-2px); }
+        .card { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1); }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #333; }
+        input[type="text"] { width: 100%; padding: 15px; border: 2px solid #e1e5e9; border-radius: 8px; font-size: 16px; transition: border-color 0.3s ease; }
+        input[type="text"]:focus { outline: none; border-color: #1e3c72; }
+        .btn { background: linear-gradient(45deg, #1e3c72, #2a5298); color: white; padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; transition: all 0.3s ease; text-decoration: none; display: inline-block; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(30, 60, 114, 0.4); }
+        .progress-container { background: #f8f9fa; border-radius: 10px; overflow: hidden; margin: 20px 0; }
+        .progress-bar { background: linear-gradient(45deg, #1e3c72, #2a5298); height: 20px; transition: width 0.3s ease; border-radius: 10px; }
+        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 0.875rem; font-weight: 600; text-transform: uppercase; }
+        .status-ongoing { background: #e74c3c; color: white; }
+        .status-announced { background: #f39c12; color: white; }
+        .status-unclear { background: #95a5a6; color: white; }
+        .alert-card { border-left: 4px solid #e74c3c; margin-bottom: 20px; }
+        .cluster-card { border-left: 4px solid #3498db; margin-bottom: 20px; }
+        .story-item { border-bottom: 1px solid #eee; padding: 15px 0; }
+        .story-item:last-child { border-bottom: none; }
+        .story-title { font-weight: 600; margin-bottom: 5px; }
+        .story-source { color: #666; font-size: 0.9rem; }
+        .score { background: linear-gradient(45deg, #1e3c72, #2a5298); color: white; padding: 4px 8px; border-radius: 12px; font-weight: 600; font-size: 0.875rem; }
+        @media (max-width: 768px) { .container { padding: 10px; } .header h1 { font-size: 2rem; } .nav { flex-direction: column; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📰 News Monitor</h1>
+            <p>Real-time news event tracking and analysis</p>
+            <div class="nav">
+                <a href="/">🏠 Home</a>
+                <a href="/historical_data">📁 Historical Data</a>
+                <a href="/event_store">📊 Event Store</a>
+            </div>
+        </div>
+        {% block content %}{% endblock %}
+    </div>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

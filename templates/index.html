@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>🔍 Start New Search</h2>
+    <p>Enter a topic to search for and analyze recent news stories:</p>
+    <form id="searchForm">
+        <div class="form-group">
+            <label for="topic">Search Topic:</label>
+            <input type="text" id="topic" name="topic" placeholder="e.g., ICE protest, climate change, election" required>
+        </div>
+        <button type="submit" class="btn">Start Search</button>
+    </form>
+</div>
+<div id="searchProgress" style="display: none;" class="card">
+    <h3>Search Progress</h3>
+    <div id="statusText">Initializing...</div>
+    <div class="progress-container">
+        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+    </div>
+    <div id="progressDetails"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('searchForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const topic = document.getElementById('topic').value.trim();
+    if (!topic) return;
+    document.getElementById('searchProgress').style.display = 'block';
+    document.getElementById('searchForm').style.display = 'none';
+    fetch('/start_search', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'topic=' + encodeURIComponent(topic)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) { alert('Error: ' + data.error); return; }
+        pollStatus(data.search_id);
+    })
+    .catch(error => { console.error('Error:', error); alert('Search failed: ' + error); });
+});
+
+function pollStatus(searchId) {
+    const poll = () => {
+        fetch('/search_status/' + searchId)
+        .then(response => response.json())
+        .then(data => {
+            updateProgress(data);
+            if (data.status === 'completed') {
+                window.location.href = '/view_results/' + searchId;
+            } else if (data.status === 'error') {
+                alert('Search failed: ' + data.error);
+                document.getElementById('searchForm').style.display = 'block';
+                document.getElementById('searchProgress').style.display = 'none';
+            } else {
+                setTimeout(poll, 2000);
+            }
+        })
+        .catch(error => { console.error('Polling error:', error); setTimeout(poll, 5000); });
+    };
+    poll();
+}
+
+function updateProgress(data) {
+    document.getElementById('statusText').textContent = data.status.replace(/_/g, ' ').toUpperCase();
+    document.getElementById('progressBar').style.width = data.progress + '%';
+    let details = '';
+    if (data.total_articles > 0) { details += `Articles: ${data.processed_articles}/${data.total_articles} `; }
+    if (data.elapsed_time) { details += `Time: ${Math.round(data.elapsed_time)}s`; }
+    document.getElementById('progressDetails').textContent = details;
+}
+</script>
+{% endblock %}
