@@ -1,4 +1,4 @@
-# 📰 News Monitor
+# 📰 Scout - News Monitor
 
 A powerful real-time news monitoring and analysis system that uses AI to track, cluster, and alert on breaking news events. Built with Python, Flask, and powered by local LLMs via Ollama.
 
