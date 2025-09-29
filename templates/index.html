@@ -13,9 +13,15 @@
   </form>
 </div>
 
+<!-- Live consensus (≥3 sources) -->
+<div class="card" id="consensusCard" style="display:none;">
+  <h3 style="text-align:center; margin-bottom:8px;">Live Consensus (≥3 sources)</h3>
+  <div id="consensusList" style="max-width:960px; margin: 0 auto;"></div>
+</div>
+
 <div class="card">
   <h3 style="margin-bottom:10px;">Search Progress</h3>
-  <div class="progress-container"><div id="progressBar" class="progress-bar"></div></div>
+  <div class="progress-container"><div id="progressBar" class="progress-bar" style="width:0%;"></div></div>
   <div style="display:flex; gap:12px; font-weight:600; color:var(--muted);">
     <div>Articles: <span id="count">0</span></div>
     <div>Time: <span id="elapsed">0s</span></div>
@@ -55,16 +61,85 @@
   }
   function renderSummary(text){
     if(!text) return "";
-    const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+    const lines = text.split(/\\r?\\n/).filter(l => l.trim() !== "");
     if(!lines.length) return escapeHtml(text);
     let html = '<ul class="summary-list" style="padding-left:16px;margin:0">';
     for(const raw of lines){
-      const content = raw.replace(/^\*\s*/, '').trim();
+      const content = raw.replace(/^\\*\\s*/, '').trim();
       const icon = emojiFor(content);
       html += `<li>${icon} ${escapeHtml(content)}</li>`;
     }
     html += '</ul>';
     return html;
+  }
+
+  // ---------- Live consensus state ----------
+  const THRESH = 3; // minimum distinct sources
+  const consensus = new Map(); // event_id -> state
+
+  function fallbackEventId(ev){
+    const t = (ev.event_type || 'other').toLowerCase();
+    const c = (ev.location?.city || '').toLowerCase();
+    const s = (ev.location?.site || '').toLowerCase();
+    return `${t}-${c}-${s}`.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  }
+
+  function updateConsensus(ev, src, raw){
+    if(!ev) return;
+    const eid = ev.event_id || fallbackEventId(ev);
+    if(!eid) return;
+    const st = consensus.get(eid) || {
+      id: eid, event_type: ev.event_type || 'other', primary_title: raw?.primary_title || '',
+      location: ev.location || {}, status: ev.status || 'unclear', last_seen_gmt: ev.last_seen_gmt || '',
+      sources: new Set(), count: 0
+    };
+    if(src) st.sources.add(src);
+    st.count = st.sources.size;
+    st.status = ev.status || st.status;
+    st.last_seen_gmt = ev.last_seen_gmt || st.last_seen_gmt;
+    st.primary_title = raw?.primary_title || st.primary_title;
+    st.event_type = ev.event_type || st.event_type;
+    st.location = ev.location || st.location;
+    consensus.set(eid, st);
+    renderConsensus();
+  }
+
+  function renderConsensus(){
+    const card = document.getElementById('consensusCard');
+    const list = document.getElementById('consensusList');
+    const confirmed = [...consensus.values()].filter(x => x.count >= THRESH);
+    if(confirmed.length === 0){
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = 'block';
+    // sort by source count desc, then freshness
+    confirmed.sort((a,b)=> (b.count-a.count) || (String(b.last_seen_gmt).localeCompare(String(a.last_seen_gmt))));
+    let html = '';
+    for(const c of confirmed){
+      const loc = [c.location?.city, c.location?.state_or_region, c.location?.site].filter(Boolean).join(' · ');
+      const badge = (type => {
+        switch(type){
+          case 'protest': return '✊ protest';
+          case 'law_enforcement': return '👮 law';
+          case 'severe_weather': return '⛈️ weather';
+          case 'public_safety': return '🚨 safety';
+          case 'infrastructure': return '🚧 infra';
+          default: return '📝 other';
+        }
+      })(c.event_type);
+      html += `
+        <div class="story-item" style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px auto;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="badge">${badge}</span>
+            <strong>${escapeHtml(loc || '(location tbd)')}</strong>
+            <span class="chip">sources: ${c.count}</span>
+            ${c.last_seen_gmt ? `<span class="chip">latest: ${escapeHtml(c.last_seen_gmt)}</span>` : ''}
+          </div>
+          ${c.primary_title ? `<div class="muted" style="margin-top:6px;">${escapeHtml(c.primary_title)}</div>` : ''}
+        </div>`;
+    }
+    list.innerHTML = html;
   }
 
   // ---------- Existing live-update logic ----------
@@ -146,6 +221,9 @@
     total = 0;
     countEl.textContent = '0';
     elapsedEl.textContent = '0s';
+    document.getElementById('consensusList').innerHTML='';
+    consensus.clear();
+    document.getElementById('consensusCard').style.display='none';
 
     const formData = new FormData();
     formData.append('topic', topicEl.value || '');
@@ -193,7 +271,12 @@
     es.addEventListener('summary', (ev) => {
       try{
         const d = JSON.parse(ev.data);
+        // update card
         updateSummary(d.idx, d.readable || '');
+        // update consensus state
+        const details = d.details || {};
+        const ev0 = (details.events && details.events[0]) ? details.events[0] : null;
+        updateConsensus(ev0, d.source, { primary_title: d.primary_title });
       }catch(_){}
     });
 
@@ -209,13 +292,6 @@
     es.addEventListener('done', () => {
       stopTimer();
       setProgress(100);
-      const link = document.createElement('a');
-      link.href = `/view_results/${sid}`;
-      link.className = 'btn';
-      link.style.display = 'inline-block';
-      link.style.marginTop = '10px';
-      link.textContent = 'View Results';
-      liveList.appendChild(link);
       es.close();
     });
 

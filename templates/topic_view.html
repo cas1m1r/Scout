@@ -1,21 +1,229 @@
 {% extends "base.html" %}
-{% block title %}Topic: {{ topic }}{% endblock %}
+{% block title %}Home{% endblock %}
+
 {% block content %}
 <div class="card">
-  <h2>📁 Topic: {{ topic }}</h2>
-  {% if latest_data %}
-    <h3>Latest Data Snapshot</h3>
-    <pre style="white-space: pre-wrap">{{ latest_data | tojson(indent=2) }}</pre>
-  {% else %}
-    <p>No data snapshots yet.</p>
-  {% endif %}
-
-  {% if latest_clusters %}
-    <h3 style="margin-top:20px">Latest Cluster Snapshot</h3>
-    <pre style="white-space: pre-wrap">{{ latest_clusters | tojson(indent=2) }}</pre>
-  {% else %}
-    <p>No cluster snapshots yet.</p>
-  {% endif %}
-  <a href="/historical_data" class="btn" style="margin-top: 16px">← Back</a>
+  <label for="topic">Start New Search</label>
+  <form id="searchForm">
+    <input id="topic" name="topic" type="text" placeholder="Enter a topic (e.g., ICE protest, Portland)" required />
+    <div style="display:flex; gap:10px; margin-top:12px; align-items:center;">
+      <button class="btn" type="submit">Start</button>
+      <span class="chip">Depth uses slider in header</span>
+    </div>
+  </form>
 </div>
+
+<div class="card">
+  <h3 style="margin-bottom:10px;">Search Progress</h3>
+  <div class="progress-container"><div id="progressBar" class="progress-bar"></div></div>
+  <div style="display:flex; gap:12px; font-weight:600; color:var(--muted);">
+    <div>Articles: <span id="count">0</span></div>
+    <div>Time: <span id="elapsed">0s</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-bottom:10px;">Live findings</h3>
+  <div id="liveList"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  // ---------- Emoji helpers (keyword -> icon) ----------
+  const EMOJI_RULES = [
+    { re: /(fire|wildfire|smoke|burning)/i, emoji: "🚒" },
+    { re: /(explosion|blast|bomb)/i, emoji: "💥" },
+    { re: /(shooting|gunshot|shots? fired|active shooter)/i, emoji: "🆘" },
+    { re: /(protest|demonstration|rally|clash|riot|march)/i, emoji: "✊" },
+    { re: /(police|law enforcement|sheriff|federal agents|ICE|border patrol|troops|national guard|military)/i, emoji: "👮" },
+    { re: /(evacuation|evacuate|shelter[- ]?in[- ]?place|lockdown)/i, emoji: "🚨" },
+    { re: /(storm|hurricane|tornado|severe weather|flood|rain|snow|blizzard)/i, emoji: "⛈️" },
+    { re: /(earthquake|seismic|aftershock)/i, emoji: "🌎" },
+    { re: /(power outage|blackout)/i, emoji: "🔌" },
+    { re: /(road closed|closure|traffic|bridge|highway)/i, emoji: "🚧" },
+  ];
+  function emojiFor(text){
+    for(const rule of EMOJI_RULES){
+      if(rule.re.test(text)) return rule.emoji;
+    }
+    return "📝";
+  }
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+  function renderSummary(text){
+    if(!text) return "";
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+    if(!lines.length) return escapeHtml(text);
+    let html = '<ul class="summary-list" style="padding-left:16px;margin:0">';
+    for(const raw of lines){
+      const content = raw.replace(/^\*\s*/, '').trim();
+      const icon = emojiFor(content);
+      html += `<li>${icon} ${escapeHtml(content)}</li>`;
+    }
+    html += '</ul>';
+    return html;
+  }
+
+  // ---------- Existing live-update logic ----------
+  const DEPTH_KEY = 'newsmon_depth';
+  const form = document.getElementById('searchForm');
+  const topicEl = document.getElementById('topic');
+  const progressBar = document.getElementById('progressBar');
+  const countEl = document.getElementById('count');
+  const liveList = document.getElementById('liveList');
+  const elapsedEl = document.getElementById('elapsed');
+
+  let startTime = 0, timer = null;
+  let total = 0;
+
+  function sec(){ return Math.floor((Date.now() - startTime)/1000); }
+  function startTimer(){ startTime = Date.now(); timer = setInterval(()=>{ elapsedEl.textContent = sec() + 's'; }, 1000); }
+  function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
+
+  // card registry by idx so we can update with summaries
+  const cards = new Map();
+
+  function makeCard(idx, total, title, source, link, date){
+    const card = document.createElement('div');
+    card.dataset.idx = String(idx);
+    card.style.border = '1px solid var(--border)';
+    card.style.borderRadius = '12px';
+    card.style.padding = '12px';
+    card.style.marginBottom = '10px';
+
+    const h = document.createElement('div');
+    h.style.fontWeight = '800';
+    h.style.marginBottom = '6px';
+    const a = document.createElement('a');
+    a.href = link || '#';
+    a.target = '_blank';
+    a.textContent = title || '(no title)';
+    h.textContent = `${idx}/${total} · `;
+    h.appendChild(a);
+    if (source) {
+      const src = document.createElement('span');
+      src.className = 'story-source';
+      src.textContent = ` — ${source}`;
+      h.appendChild(src);
+    }
+    card.appendChild(h);
+
+    const sub = document.createElement('div');
+    sub.className = 'story-source';
+    sub.style.marginBottom = '4px';
+    if (date) sub.textContent = date;
+    card.appendChild(sub);
+
+    const body = document.createElement('div');
+    body.className = 'summary';
+    body.style.lineHeight = '1.45';
+    body.style.color = 'var(--text)';
+    body.innerHTML = '<span class="muted">Summarizing…</span>';
+    card.appendChild(body);
+
+    liveList.appendChild(card);
+    cards.set(idx, card);
+    return card;
+  }
+
+  function updateSummary(idx, text){
+    const card = cards.get(idx);
+    if (!card) return;
+    const body = card.querySelector('.summary');
+    if (body) body.innerHTML = renderSummary(text || '');
+  }
+
+  function setProgress(pct){ progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%'; }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    liveList.innerHTML = '';
+    cards.clear();
+    setProgress(0);
+    total = 0;
+    countEl.textContent = '0';
+    elapsedEl.textContent = '0s';
+
+    const formData = new FormData();
+    formData.append('topic', topicEl.value || '');
+    formData.append('depth', localStorage.getItem(DEPTH_KEY) || '100');
+
+    const res = await fetch('/start_search', { method:'POST', body: formData });
+    const j = await res.json();
+    if (!j.search_id){
+      alert(j.error || 'Failed to start search');
+      return;
+    }
+
+    const sid = j.search_id;
+    startTimer();
+
+    const es = new EventSource(`/stream/${sid}`);
+
+    es.addEventListener('status', (ev) => {
+      try{
+        const data = JSON.parse(ev.data);
+        if (typeof data.progress === 'number') setProgress(data.progress);
+      }catch(_){}
+    });
+
+    es.addEventListener('progress', (ev) => {
+      try{
+        const data = JSON.parse(ev.data);
+        if (typeof data.total === 'number') {
+          total = data.total;
+          const processed = data.processed || 0;
+          countEl.textContent = `${processed}/${total}`;
+        }
+        if (typeof data.progress === 'number') setProgress(data.progress);
+      }catch(_){}
+    });
+
+    es.addEventListener('headline', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        total = d.total || total;
+        makeCard(d.idx, d.total, d.title, d.source, d.link, d.date);
+      }catch(_){}
+    });
+
+    es.addEventListener('summary', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        updateSummary(d.idx, d.readable || '');
+      }catch(_){}
+    });
+
+    // backwards compat if server ever emits a single 'story' event
+    es.addEventListener('story', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        if (!cards.has(d.index)) makeCard(d.index, d.total, d.title, d.source, d.link, d.date);
+        updateSummary(d.index, d.readable || '');
+      }catch(_){}
+    });
+
+    es.addEventListener('done', () => {
+      stopTimer();
+      setProgress(100);
+      const link = document.createElement('a');
+      link.href = `/view_results/${sid}`;
+      link.className = 'btn';
+      link.style.display = 'inline-block';
+      link.style.marginTop = '10px';
+      link.textContent = 'View Results';
+      liveList.appendChild(link);
+      es.close();
+    });
+
+    es.addEventListener('error', () => {
+      stopTimer();
+      es.close();
+    });
+  });
+})();
+</script>
 {% endblock %}
