@@ -13,9 +13,9 @@
   </form>
 </div>
 
-<!-- Live consensus (≥3 sources) -->
+<!-- Live consensus (≥N sources) -->
 <div class="card" id="consensusCard" style="display:none;">
-  <h3 style="text-align:center; margin-bottom:8px;">Live Consensus (≥3 sources)</h3>
+  <h3 style="text-align:center; margin-bottom:8px;">Live Consensus (≥N sources)</h3>
   <div id="consensusList" style="max-width:960px; margin: 0 auto;"></div>
 </div>
 
@@ -35,8 +35,21 @@
 {% endblock %}
 
 {% block scripts %}
+<style>
+  /* Per-card collapse UI */
+  .card-item{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px}
+  .card-item.collapsed .summary{display:none}
+  .story-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;cursor:pointer}
+  .story-head a{font-weight:800}
+  .toggle-btn{background:transparent;border:0;color:var(--link);cursor:pointer;font-weight:700;display:flex;align-items:center;gap:.25rem}
+  .chev{display:inline-block;transition:transform .15s ease}
+  .card-item.collapsed .chev{transform:rotate(-90deg)}
+</style>
+
 <script>
 (function(){
+  const DEBUG = false;
+
   // ---------- Emoji helpers (keyword -> icon) ----------
   const EMOJI_RULES = [
     { re: /(fire|wildfire|smoke|burning)/i, emoji: "🚒" },
@@ -57,15 +70,15 @@
     return "📝";
   }
   function escapeHtml(s){
-    return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    return (s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
   function renderSummary(text){
     if(!text) return "";
-    const lines = text.split(/\\r?\\n/).filter(l => l.trim() !== "");
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
     if(!lines.length) return escapeHtml(text);
     let html = '<ul class="summary-list" style="padding-left:16px;margin:0">';
     for(const raw of lines){
-      const content = raw.replace(/^\\*\\s*/, '').trim();
+      const content = raw.replace(/^\*\s*/, '').trim();
       const icon = emojiFor(content);
       html += `<li>${icon} ${escapeHtml(content)}</li>`;
     }
@@ -73,76 +86,233 @@
     return html;
   }
 
-  // ---------- Live consensus state ----------
-  const THRESH = 3; // minimum distinct sources
-  const consensus = new Map(); // event_id -> state
+  /* ===================== CONSENSUS V2 ===================== */
+  const THRESH = 2; // raise to 3+ once you're happy
+  const consensus = new Map(); // key -> aggregate record
 
-  function fallbackEventId(ev){
-    const t = (ev.event_type || 'other').toLowerCase();
-    const c = (ev.location?.city || '').toLowerCase();
-    const s = (ev.location?.site || '').toLowerCase();
-    return `${t}-${c}-${s}`.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  // Normalization helpers
+  const EVENT_SYNONYMS = {
+    demonstration:'protest', demonstrations:'protest', rally:'protest', rallies:'protest',
+    clash:'protest', clashes:'protest', march:'protest', marches:'protest',
+    police:'law_enforcement', law_enforcement:'law_enforcement'
+  };
+  const CITY_ALIASES = {
+    'portland oregon': 'portland, or',
+    'portland, oregon': 'portland, or',
+    'nyc': 'new york, ny',
+    'new york city': 'new york, ny'
+  };
+  const STOP = new Set([
+    'the','and','for','with','from','that','this','have','has','are','was','were','into','over','after','before','about',
+    'said','says','report','reports','update','live','breaking','local','news','today','yesterday','police','officials'
+  ]);
+
+  function slug(s){ return (s||'').toLowerCase().trim().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,''); }
+  function normEventType(t){ const k=(t||'').toLowerCase().trim(); return EVENT_SYNONYMS[k]||k||'other'; }
+  function normCityRegion(city, region){
+    let cr = (city||'').toLowerCase().trim();
+    if (region) cr += ', ' + (region||'').toLowerCase().trim();
+    cr = cr.replace(/\./g,'').replace(/\s*\(.*?\)\s*/g,'').replace(/\s*,\s*/g, ', ').replace(/\s+/g,' ');
+    return CITY_ALIASES[cr] || cr;
   }
-
-  function updateConsensus(ev, src, raw){
-    if(!ev) return;
-    const eid = ev.event_id || fallbackEventId(ev);
-    if(!eid) return;
-    const st = consensus.get(eid) || {
-      id: eid, event_type: ev.event_type || 'other', primary_title: raw?.primary_title || '',
-      location: ev.location || {}, status: ev.status || 'unclear', last_seen_gmt: ev.last_seen_gmt || '',
-      sources: new Set(), count: 0
+  function normSite(site){
+    return (site||'').toLowerCase().trim()
+      .replace(/(facility|center|centre|building|office|hq|headquarters|plaza|mall|station|park)/g,'')
+      .replace(/\s+/g,' ')
+      .replace(/[^\w\s-]/g,'')
+      .trim();
+  }
+  function canonicalDomain(url){
+    try {
+      const u = new URL(url);
+      return u.hostname.replace(/^www\./,'').toLowerCase();
+    } catch { return ''; }
+  }
+  function canonicalUrl(url){
+    try{
+      let u = new URL(url);
+      if (u.hostname.replace(/^www\./,'').toLowerCase()==='news.google.com'){
+        const real = u.searchParams.get('url');
+        if (real) u = new URL(real);
+      }
+      const host = u.hostname.replace(/^www\./,'').toLowerCase();
+      let path = u.pathname.replace(/\/+/g,'/').replace(/\/$/,'');
+      return host + path;
+    }catch{ return ''; }
+  }
+  function tokenize(text){
+    return (text||'').toLowerCase()
+      .replace(/[^\w\s]/g,' ')
+      .split(/\s+/)
+      .filter(w => w.length>=4 && !STOP.has(w));
+  }
+  function jaccard(aSet, bSet){
+    const a = new Set(aSet), b = new Set(bSet);
+    if (!a.size && !b.size) return 0;
+    let inter=0; for (const x of a){ if (b.has(x)) inter++; }
+    return inter / (a.size + b.size - inter);
+  }
+  function titleSim(a,b){
+    a=(a||'').toLowerCase(); b=(b||'').toLowerCase();
+    if (!a || !b) return 0;
+    const grams = s => {
+      const m = new Map();
+      for (let i=0;i<s.length-1;i++){
+        const k = s.slice(i,i+2);
+        m.set(k,(m.get(k)||0)+1);
+      }
+      return m;
     };
-    if(src) st.sources.add(src);
-    st.count = st.sources.size;
-    st.status = ev.status || st.status;
-    st.last_seen_gmt = ev.last_seen_gmt || st.last_seen_gmt;
-    st.primary_title = raw?.primary_title || st.primary_title;
-    st.event_type = ev.event_type || st.event_type;
-    st.location = ev.location || st.location;
-    consensus.set(eid, st);
-    renderConsensus();
+    const A=grams(a), B=grams(b);
+    let inter=0, total=0;
+    for (const [k,v] of A){ inter += Math.min(v, B.get(k)||0); total += v; }
+    for (const [,v] of B){ total += v; }
+    return total ? (2*inter)/total : 0;
+  }
+  function parseISO(s){ const t=Date.parse(s); return Number.isFinite(t)? new Date(t) : null; }
+  function timeBucket(iso, hours=6){
+    const d = parseISO(iso);
+    if (!d) return null;
+    return Math.floor(d.getTime() / (hours*3600*1000));
   }
 
-  function renderConsensus(){
+  function eventKeyFromDetails(details){
+    const ev = details && details.events && details.events[0];
+    if (!ev) return null;
+    const id = (ev.event_id||'').trim();
+    if (id) return slug(id);
+    const t = normEventType(ev.event_type);
+    const cr = normCityRegion(ev.location?.city, ev.location?.state_or_region);
+    const site = normSite(ev.location?.site);
+    return slug([t, cr, site].filter(Boolean).join('|'));
+  }
+  function maybeMergeKey(key, title, store, threshold=0.86){
+    if (!key || !title) return key;
+    for (const [k, rec] of store.entries()){
+      const topTitle = rec.primary_title || rec.titles?.[0] || '';
+      if (titleSim(title, topTitle) >= threshold) return k;
+    }
+    return key;
+  }
+
+  function findClusterKey(candidate){
+    if (candidate.linkKey){
+      for (const [k,rec] of consensus.entries()){
+        if (rec.linkKeys && rec.linkKeys.has(candidate.linkKey)) return k;
+      }
+    }
+    let bestKey=null, bestScore=0;
+    for (const [k,rec] of consensus.entries()){
+      let score = 0;
+      if (candidate.bucket!=null && rec.bucket!=null && candidate.bucket===rec.bucket) score += 0.5;
+      if (candidate.city_region && rec.info?.city_region && candidate.city_region===rec.info.city_region) score += 0.5;
+      if (candidate.site && rec.info?.site){
+        if (candidate.site===rec.info.site || candidate.site.includes(rec.info.site) || rec.info.site.includes(candidate.site)) score += 0.3;
+      }
+      const tSim = titleSim(candidate.title, rec.primary_title || rec.titles?.[0]);
+      const jSim = jaccard(candidate.tokens, rec.tokens || new Set());
+      score += Math.min(0.6, tSim);
+      score += Math.min(0.4, jSim);
+      if (score > bestScore){ bestScore = score; bestKey = k; }
+    }
+    return (bestScore >= 0.9) ? bestKey : null;
+  }
+
+  function renderConsensusPanel(){
     const card = document.getElementById('consensusCard');
     const list = document.getElementById('consensusList');
-    const confirmed = [...consensus.values()].filter(x => x.count >= THRESH);
-    if(confirmed.length === 0){
+
+    const confirmed = [...consensus.values()]
+      .map(r => ({...r, uniq: Math.max(r.sources.size, r.domains.size)}))
+      .filter(r => r.uniq >= THRESH);
+
+    if (!confirmed.length){
       card.style.display = 'none';
+      list.innerHTML = '';
       return;
     }
     card.style.display = 'block';
-    // sort by source count desc, then freshness
-    confirmed.sort((a,b)=> (b.count-a.count) || (String(b.last_seen_gmt).localeCompare(String(a.last_seen_gmt))));
+
+    const badgeFor = (type) => {
+      switch(type){
+        case 'protest': return '✊ protest';
+        case 'law_enforcement': return '👮 law';
+        case 'severe_weather': return '⛈️ weather';
+        case 'public_safety': return '🚨 safety';
+        case 'infrastructure': return '🚧 infra';
+        default: return '📝 other';
+      }
+    };
+
+    confirmed.sort((a,b) =>
+      (b.uniq - a.uniq) ||
+      String(b.latest||'').localeCompare(String(a.latest||'')));
+
     let html = '';
-    for(const c of confirmed){
-      const loc = [c.location?.city, c.location?.state_or_region, c.location?.site].filter(Boolean).join(' · ');
-      const badge = (type => {
-        switch(type){
-          case 'protest': return '✊ protest';
-          case 'law_enforcement': return '👮 law';
-          case 'severe_weather': return '⛈️ weather';
-          case 'public_safety': return '🚨 safety';
-          case 'infrastructure': return '🚧 infra';
-          default: return '📝 other';
-        }
-      })(c.event_type);
+    for (const r of confirmed){
+      const loc = [r.info?.city_region, r.info?.site].filter(Boolean).join(' · ');
       html += `
         <div class="story-item" style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px auto;">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span class="badge">${badge}</span>
+            <span class="badge">${badgeFor(r.info?.event_type)}</span>
             <strong>${escapeHtml(loc || '(location tbd)')}</strong>
-            <span class="chip">sources: ${c.count}</span>
-            ${c.last_seen_gmt ? `<span class="chip">latest: ${escapeHtml(c.last_seen_gmt)}</span>` : ''}
+            <span class="chip">sources: ${r.uniq}</span>
+            ${r.latest ? `<span class="chip">latest: ${escapeHtml(r.latest)}</span>` : ''}
           </div>
-          ${c.primary_title ? `<div class="muted" style="margin-top:6px;">${escapeHtml(c.primary_title)}</div>` : ''}
+          ${r.primary_title ? `<div class="muted" style="margin-top:6px;">${escapeHtml(r.primary_title)}</div>` : ''}
         </div>`;
     }
     list.innerHTML = html;
   }
 
-  // ---------- Existing live-update logic ----------
+  function addConsensusEvidence(d){
+    const ev0 = d.details?.events?.[0] || {};
+    const event_type = normEventType(ev0.event_type);
+    const city_region = normCityRegion(ev0.location?.city, ev0.location?.state_or_region);
+    const site = normSite(ev0.location?.site);
+    const last = ev0.last_seen_gmt || d.date || null;
+    const bucket = timeBucket(last, 6);
+    const linkKey = canonicalUrl(d.link || '');
+    const domain = canonicalDomain(d.link || '');
+    const srcName = (d.source || '').trim() || domain;
+    const title = d.title || d.primary_title || '';
+    const tokens = new Set(tokenize((d.readable||'') + ' ' + title));
+
+    let key0 = eventKeyFromDetails(d.details || {}) ||
+               slug([event_type, city_region, site, bucket].filter(Boolean).join('|'));
+    let key = maybeMergeKey(key0, title, consensus);
+    const matched = findClusterKey({title, tokens, bucket, city_region, site, linkKey});
+    const finalKey = matched || key;
+
+    if (!consensus.has(finalKey)){
+      consensus.set(finalKey, {
+        sources: new Set(),
+        domains: new Set(),
+        linkKeys: new Set(),
+        titles: [],
+        tokens: new Set(tokens),
+        bucket,
+        latest: last,
+        info: {event_type, city_region, site},
+        primary_title: title,
+        primary_link: d.link || ''
+      });
+    }
+    const rec = consensus.get(finalKey);
+    if (srcName) rec.sources.add(srcName);
+    if (domain) rec.domains.add(domain);
+    if (linkKey) rec.linkKeys.add(linkKey);
+    if (title) rec.titles.unshift(title);
+    for (const t of tokens) rec.tokens.add(t);
+    if (last && (!rec.latest || last > rec.latest)) rec.latest = last;
+
+    // Render only when threshold is met
+    const uniq = Math.max(rec.sources.size, rec.domains.size);
+    if (uniq >= THRESH) renderConsensusPanel();
+  }
+  /* ===================== END CONSENSUS V2 ===================== */
+
+  // ---------- Live-update logic ----------
   const DEPTH_KEY = 'newsmon_depth';
   const form = document.getElementById('searchForm');
   const topicEl = document.getElementById('topic');
@@ -153,38 +323,59 @@
 
   let startTime = 0, timer = null;
   let total = 0;
+  let processedFromHeadlines = 0; // fallback when server doesn't send processed count
 
   function sec(){ return Math.floor((Date.now() - startTime)/1000); }
   function startTimer(){ startTime = Date.now(); timer = setInterval(()=>{ elapsedEl.textContent = sec() + 's'; }, 1000); }
   function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
+  function setProgress(pct){ progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%'; }
 
   // card registry by idx so we can update with summaries
   const cards = new Map();
 
-  function makeCard(idx, total, title, source, link, date){
+  function makeCard(idx, totalCount, title, source, link, date){
     const card = document.createElement('div');
     card.dataset.idx = String(idx);
-    card.style.border = '1px solid var(--border)';
-    card.style.borderRadius = '12px';
-    card.style.padding = '12px';
-    card.style.marginBottom = '10px';
+    card.className = 'card-item';
 
-    const h = document.createElement('div');
-    h.style.fontWeight = '800';
-    h.style.marginBottom = '6px';
+    // Header (click to toggle, except when clicking the story link)
+    const head = document.createElement('div');
+    head.className = 'story-head';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'toggle-btn';
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.innerHTML = '<span class="chev">▼</span>';
+
+    const titleWrap = document.createElement('span');
+    titleWrap.style.fontWeight = '800';
+    titleWrap.textContent = `${idx}/${totalCount} · `;
+
     const a = document.createElement('a');
     a.href = link || '#';
     a.target = '_blank';
     a.textContent = title || '(no title)';
-    h.textContent = `${idx}/${total} · `;
-    h.appendChild(a);
+
+    titleWrap.appendChild(a);
+    head.appendChild(toggle);
+    head.appendChild(titleWrap);
+
     if (source) {
       const src = document.createElement('span');
       src.className = 'story-source';
       src.textContent = ` — ${source}`;
-      h.appendChild(src);
+      head.appendChild(src);
     }
-    card.appendChild(h);
+
+    head.addEventListener('click', (e) => {
+      if (e.target && e.target.closest('a')) return;
+      card.classList.toggle('collapsed');
+      const expanded = !card.classList.contains('collapsed');
+      toggle.setAttribute('aria-expanded', String(expanded));
+    });
+
+    card.appendChild(head);
 
     const sub = document.createElement('div');
     sub.className = 'story-source';
@@ -211,14 +402,13 @@
     if (body) body.innerHTML = renderSummary(text || '');
   }
 
-  function setProgress(pct){ progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%'; }
-
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     liveList.innerHTML = '';
     cards.clear();
     setProgress(0);
     total = 0;
+    processedFromHeadlines = 0;
     countEl.textContent = '0';
     elapsedEl.textContent = '0s';
     document.getElementById('consensusList').innerHTML='';
@@ -244,6 +434,12 @@
     es.addEventListener('status', (ev) => {
       try{
         const data = JSON.parse(ev.data);
+        if (DEBUG) console.debug('status', data);
+        if (typeof data.total === 'number') total = data.total;
+        if (typeof data.processed === 'number') {
+          countEl.textContent = `${data.processed}/${total || '?'}`;
+          if (total > 0) setProgress((data.processed/total)*100);
+        }
         if (typeof data.progress === 'number') setProgress(data.progress);
       }catch(_){}
     });
@@ -251,39 +447,45 @@
     es.addEventListener('progress', (ev) => {
       try{
         const data = JSON.parse(ev.data);
-        if (typeof data.total === 'number') {
-          total = data.total;
-          const processed = data.processed || 0;
-          countEl.textContent = `${processed}/${total}`;
+        if (DEBUG) console.debug('progress', data);
+        if (typeof data.total === 'number') total = data.total;
+        const processed = data.processed || processedFromHeadlines;
+        countEl.textContent = `${processed}/${total || '?'}`;
+        if (typeof data.progress === 'number') {
+          setProgress(data.progress);
+        } else if (total > 0) {
+          setProgress((processed/total)*100);
         }
-        if (typeof data.progress === 'number') setProgress(data.progress);
       }catch(_){}
     });
 
     es.addEventListener('headline', (ev) => {
       try{
         const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('headline', d);
         total = d.total || total;
         makeCard(d.idx, d.total, d.title, d.source, d.link, d.date);
+        processedFromHeadlines = Math.max(processedFromHeadlines, d.idx || 0);
+        countEl.textContent = `${processedFromHeadlines}/${total || '?'}`;
+        if (total > 0) setProgress((processedFromHeadlines/total)*100);
       }catch(_){}
     });
 
+    // NEW: robust consensus + per-card summary update
     es.addEventListener('summary', (ev) => {
       try{
         const d = JSON.parse(ev.data);
-        // update card
+        if (DEBUG) console.debug('summary', d);
         updateSummary(d.idx, d.readable || '');
-        // update consensus state
-        const details = d.details || {};
-        const ev0 = (details.events && details.events[0]) ? details.events[0] : null;
-        updateConsensus(ev0, d.source, { primary_title: d.primary_title });
+        addConsensusEvidence(d);
       }catch(_){}
     });
 
-    // backwards compat if server ever emits a single 'story' event
+    // Back-compat if server emits a single 'story' event
     es.addEventListener('story', (ev) => {
       try{
         const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('story', d);
         if (!cards.has(d.index)) makeCard(d.index, d.total, d.title, d.source, d.link, d.date);
         updateSummary(d.index, d.readable || '');
       }catch(_){}
@@ -291,6 +493,12 @@
 
     es.addEventListener('done', () => {
       stopTimer();
+      if (total === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'muted';
+        empty.textContent = 'No articles found for this query.';
+        liveList.appendChild(empty);
+      }
       setProgress(100);
       es.close();
     });
