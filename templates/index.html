@@ -1,16 +1,34 @@
 {% extends "base.html" %}
-{% block title %}Home{% endblock %}
+{% block title %}Continuous Monitor{% endblock %}
 
 {% block content %}
 <div class="card">
-  <label for="topic">Start New Search</label>
+  <label for="topic">Start Continuous Monitoring</label>
   <form id="searchForm">
     <input id="topic" name="topic" type="text" placeholder="Enter a topic (e.g., ICE protest, Portland)" required />
-    <div style="display:flex; gap:10px; margin-top:12px; align-items:center;">
-      <button class="btn" type="submit">Start</button>
+    <div style="display:flex; gap:10px; margin-top:12px; align-items:center; flex-wrap:wrap;">
+      <div class="depth-wrap" title="Polling interval">
+        <span class="chip">Poll every</span>
+        <input id="intervalInput" type="number" min="60" max="3600" value="300" style="width:80px;padding:8px;border-radius:6px;border:2px solid var(--border);" />
+        <span class="chip">seconds</span>
+      </div>
+      <button id="startBtn" class="btn" type="submit">▶ Start Monitoring</button>
+      <button id="stopBtn" class="btn" type="button" style="display:none;background:#dc2626;">⏹ Stop</button>
       <span class="chip">Depth uses slider in header</span>
     </div>
   </form>
+</div>
+
+<!-- Monitoring status -->
+<div class="card" id="statusCard" style="display:none;">
+  <h3 style="margin-bottom:10px;">Monitoring Status</h3>
+  <div style="display:flex; gap:16px; flex-wrap:wrap; font-weight:600; color:var(--text);">
+    <div>Cycle: <span id="cycleNum">0</span></div>
+    <div>Status: <span id="statusText">Initializing</span></div>
+    <div>New this cycle: <span id="newCount">0</span></div>
+    <div>Total unique: <span id="totalUnique">0</span></div>
+    <div>Elapsed: <span id="elapsed">0s</span></div>
+  </div>
 </div>
 
 <!-- Live consensus (≥N sources) -->
@@ -19,24 +37,22 @@
   <div id="consensusList" style="max-width:960px; margin: 0 auto;"></div>
 </div>
 
-<div class="card">
-  <h3 style="margin-bottom:10px;">Search Progress</h3>
+<div class="card" id="progressCard" style="display:none;">
+  <h3 style="margin-bottom:10px;">Current Cycle Progress</h3>
   <div class="progress-container"><div id="progressBar" class="progress-bar" style="width:0%;"></div></div>
   <div style="display:flex; gap:12px; font-weight:600; color:var(--muted);">
-    <div>Articles: <span id="count">0</span></div>
-    <div>Time: <span id="elapsed">0s</span></div>
+    <div>Processing: <span id="count">0</span></div>
   </div>
 </div>
 
 <div class="card">
-  <h3 style="margin-bottom:10px;">Live findings</h3>
+  <h3 style="margin-bottom:10px;">Live findings <span id="cycleLabel" class="chip"></span></h3>
   <div id="liveList"></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <style>
-  /* Per-card collapse UI */
   .card-item{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px}
   .card-item.collapsed .summary{display:none}
   .story-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;cursor:pointer}
@@ -44,15 +60,35 @@
   .toggle-btn{background:transparent;border:0;color:var(--link);cursor:pointer;font-weight:700;display:flex;align-items:center;gap:.25rem}
   .chev{display:inline-block;transition:transform .15s ease}
   .card-item.collapsed .chev{transform:rotate(-90deg)}
+  .cycle-divider{background:var(--primary);color:white;padding:12px;border-radius:8px;margin:20px 0;text-align:center;font-weight:800;font-size:1.1rem;}
+  
+  /* Consensus hover details */
+  .consensus-item { position: relative; transition: all 0.2s ease; }
+  .consensus-item:hover { border-color: var(--primary) !important; }
+  .cluster-details { 
+    display: none; 
+    margin-top: 10px; 
+    padding: 10px; 
+    background: var(--bg); 
+    border-radius: 6px; 
+    font-size: 0.9em;
+    animation: slideDown 0.2s ease;
+  }
+  .consensus-item:hover .cluster-details { display: block; }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 </style>
 
 <script>
 (function(){
   const DEBUG = false;
-
-  // ---------- Emoji helpers (keyword -> icon) ----------
+  const THRESH = 2;
+  
+  // Emoji helpers
   const EMOJI_RULES = [
-    { re: /(fire|wildfire|smoke|burning)/i, emoji: "🚒" },
+    { re: /(fire|wildfire|smoke|burning)/i, emoji: "🔥" },
     { re: /(explosion|blast|bomb)/i, emoji: "💥" },
     { re: /(shooting|gunshot|shots? fired|active shooter)/i, emoji: "🆘" },
     { re: /(protest|demonstration|rally|clash|riot|march)/i, emoji: "✊" },
@@ -63,15 +99,18 @@
     { re: /(power outage|blackout)/i, emoji: "🔌" },
     { re: /(road closed|closure|traffic|bridge|highway)/i, emoji: "🚧" },
   ];
+  
   function emojiFor(text){
     for(const rule of EMOJI_RULES){
       if(rule.re.test(text)) return rule.emoji;
     }
-    return "📝";
+    return "📰";
   }
+  
   function escapeHtml(s){
     return (s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
+  
   function renderSummary(text){
     if(!text) return "";
     const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
@@ -86,11 +125,8 @@
     return html;
   }
 
-  /* ===================== CONSENSUS V2 ===================== */
-  const THRESH = 2; // raise to 3+ once you're happy
-  const consensus = new Map(); // key -> aggregate record
-
-  // Normalization helpers
+  // Consensus tracking (same as before)
+  const consensus = new Map();
   const EVENT_SYNONYMS = {
     demonstration:'protest', demonstrations:'protest', rally:'protest', rallies:'protest',
     clash:'protest', clashes:'protest', march:'protest', marches:'protest',
@@ -240,7 +276,7 @@
         case 'severe_weather': return '⛈️ weather';
         case 'public_safety': return '🚨 safety';
         case 'infrastructure': return '🚧 infra';
-        default: return '📝 other';
+        default: return '📰 other';
       }
     };
 
@@ -251,8 +287,12 @@
     let html = '';
     for (const r of confirmed){
       const loc = [r.info?.city_region, r.info?.site].filter(Boolean).join(' · ');
+      const titles = [...new Set(r.titles || [])].slice(0, 10);
+      const titleList = titles.map(t => `• ${escapeHtml(t)}`).join('\n');
+      const tooltipText = `Stories in this cluster:\n${titleList}${titles.length >= 10 ? '\n...' : ''}`;
+      
       html += `
-        <div class="story-item" style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px auto;">
+        <div class="story-item consensus-item" style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px auto;cursor:help;">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span class="badge">${badgeFor(r.info?.event_type)}</span>
             <strong>${escapeHtml(loc || '(location tbd)')}</strong>
@@ -260,6 +300,10 @@
             ${r.latest ? `<span class="chip">latest: ${escapeHtml(r.latest)}</span>` : ''}
           </div>
           ${r.primary_title ? `<div class="muted" style="margin-top:6px;">${escapeHtml(r.primary_title)}</div>` : ''}
+          <div class="cluster-details">
+            <strong style="color:var(--primary);">📋 Stories in cluster (${titles.length}):</strong>
+            <ul style="margin:6px 0 0;padding-left:20px;line-height:1.6;">${titles.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
+          </div>
         </div>`;
     }
     list.innerHTML = html;
@@ -306,39 +350,49 @@
     for (const t of tokens) rec.tokens.add(t);
     if (last && (!rec.latest || last > rec.latest)) rec.latest = last;
 
-    // Render only when threshold is met
     const uniq = Math.max(rec.sources.size, rec.domains.size);
     if (uniq >= THRESH) renderConsensusPanel();
   }
-  /* ===================== END CONSENSUS V2 ===================== */
 
-  // ---------- Live-update logic ----------
+  // UI Elements
   const DEPTH_KEY = 'newsmon_depth';
   const form = document.getElementById('searchForm');
   const topicEl = document.getElementById('topic');
+  const intervalInput = document.getElementById('intervalInput');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const statusCard = document.getElementById('statusCard');
+  const progressCard = document.getElementById('progressCard');
   const progressBar = document.getElementById('progressBar');
   const countEl = document.getElementById('count');
   const liveList = document.getElementById('liveList');
+  const cycleNum = document.getElementById('cycleNum');
+  const statusText = document.getElementById('statusText');
+  const newCount = document.getElementById('newCount');
+  const totalUnique = document.getElementById('totalUnique');
   const elapsedEl = document.getElementById('elapsed');
+  const cycleLabel = document.getElementById('cycleLabel');
 
   let startTime = 0, timer = null;
-  let total = 0;
-  let processedFromHeadlines = 0; // fallback when server doesn't send processed count
+  let currentSearchId = null;
+  let currentCycle = 0;
+  let totalStoriesEver = 0;
+  const cards = new Map();
 
   function sec(){ return Math.floor((Date.now() - startTime)/1000); }
-  function startTimer(){ startTime = Date.now(); timer = setInterval(()=>{ elapsedEl.textContent = sec() + 's'; }, 1000); }
+  function startTimer(){ 
+    startTime = Date.now(); 
+    timer = setInterval(()=>{ elapsedEl.textContent = sec() + 's'; }, 1000); 
+  }
   function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
   function setProgress(pct){ progressBar.style.width = Math.max(0, Math.min(100, pct)) + '%'; }
 
-  // card registry by idx so we can update with summaries
-  const cards = new Map();
-
-  function makeCard(idx, totalCount, title, source, link, date){
+  function makeCard(idx, total, title, source, link, date, cycle){
+    const globalIdx = totalStoriesEver + idx;
     const card = document.createElement('div');
-    card.dataset.idx = String(idx);
+    card.dataset.idx = String(globalIdx);
     card.className = 'card-item';
 
-    // Header (click to toggle, except when clicking the story link)
     const head = document.createElement('div');
     head.className = 'story-head';
 
@@ -350,7 +404,7 @@
 
     const titleWrap = document.createElement('span');
     titleWrap.style.fontWeight = '800';
-    titleWrap.textContent = `${idx}/${totalCount} · `;
+    titleWrap.textContent = `[C${cycle}] ${idx}/${total} · `;
 
     const a = document.createElement('a');
     a.href = link || '#';
@@ -391,33 +445,48 @@
     card.appendChild(body);
 
     liveList.appendChild(card);
-    cards.set(idx, card);
+    cards.set(globalIdx, card);
     return card;
   }
 
-  function updateSummary(idx, text){
-    const card = cards.get(idx);
+  function updateSummary(idx, text, cycle){
+    const globalIdx = totalStoriesEver + idx;
+    const card = cards.get(globalIdx);
     if (!card) return;
     const body = card.querySelector('.summary');
     if (body) body.innerHTML = renderSummary(text || '');
   }
 
+  function addCycleDivider(cycle, newStories){
+    const div = document.createElement('div');
+    div.className = 'cycle-divider';
+    div.textContent = `🔄 Cycle ${cycle} — ${newStories} new stories`;
+    liveList.appendChild(div);
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    
+    // Clear previous monitoring
+    if (currentSearchId) {
+      await fetch(`/stop_search/${currentSearchId}`, {method:'POST'});
+    }
+    
     liveList.innerHTML = '';
     cards.clear();
     setProgress(0);
-    total = 0;
-    processedFromHeadlines = 0;
     countEl.textContent = '0';
     elapsedEl.textContent = '0s';
-    document.getElementById('consensusList').innerHTML='';
     consensus.clear();
     document.getElementById('consensusCard').style.display='none';
+    document.getElementById('consensusList').innerHTML='';
+    currentCycle = 0;
+    totalStoriesEver = 0;
 
     const formData = new FormData();
     formData.append('topic', topicEl.value || '');
     formData.append('depth', localStorage.getItem(DEPTH_KEY) || '100');
+    formData.append('interval', intervalInput.value || '300');
 
     const res = await fetch('/start_search', { method:'POST', body: formData });
     const j = await res.json();
@@ -426,36 +495,46 @@
       return;
     }
 
-    const sid = j.search_id;
+    currentSearchId = j.search_id;
+    startBtn.style.display = 'none';
+    stopBtn.style.display = 'inline-block';
+    statusCard.style.display = 'block';
+    progressCard.style.display = 'block';
     startTimer();
 
-    const es = new EventSource(`/stream/${sid}`);
+    const es = new EventSource(`/stream/${currentSearchId}`);
 
-    es.addEventListener('status', (ev) => {
+    es.addEventListener('cycle_start', (ev) => {
       try{
-        const data = JSON.parse(ev.data);
-        if (DEBUG) console.debug('status', data);
-        if (typeof data.total === 'number') total = data.total;
-        if (typeof data.processed === 'number') {
-          countEl.textContent = `${data.processed}/${total || '?'}`;
-          if (total > 0) setProgress((data.processed/total)*100);
-        }
-        if (typeof data.progress === 'number') setProgress(data.progress);
+        const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('cycle_start', d);
+        currentCycle = d.cycle;
+        cycleNum.textContent = d.cycle;
+        statusText.textContent = d.message || 'Starting cycle...';
+        cycleLabel.textContent = `(Cycle ${d.cycle})`;
+        newCount.textContent = '0';
       }catch(_){}
     });
 
-    es.addEventListener('progress', (ev) => {
+    es.addEventListener('cycle_info', (ev) => {
       try{
-        const data = JSON.parse(ev.data);
-        if (DEBUG) console.debug('progress', data);
-        if (typeof data.total === 'number') total = data.total;
-        const processed = data.processed || processedFromHeadlines;
-        countEl.textContent = `${processed}/${total || '?'}`;
-        if (typeof data.progress === 'number') {
-          setProgress(data.progress);
-        } else if (total > 0) {
-          setProgress((processed/total)*100);
+        const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('cycle_info', d);
+        newCount.textContent = d.new_stories;
+        statusText.textContent = `Fetched ${d.total_fetched} articles (${d.new_stories} new, ${d.already_seen} seen)`;
+        
+        if (d.new_stories > 0 && currentCycle > 1) {
+          addCycleDivider(d.cycle, d.new_stories);
         }
+      }catch(_){}
+    });
+
+    es.addEventListener('no_new_stories', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('no_new_stories', d);
+        statusText.textContent = d.message;
+        setProgress(0);
       }catch(_){}
     });
 
@@ -463,51 +542,87 @@
       try{
         const d = JSON.parse(ev.data);
         if (DEBUG) console.debug('headline', d);
-        total = d.total || total;
-        makeCard(d.idx, d.total, d.title, d.source, d.link, d.date);
-        processedFromHeadlines = Math.max(processedFromHeadlines, d.idx || 0);
-        countEl.textContent = `${processedFromHeadlines}/${total || '?'}`;
-        if (total > 0) setProgress((processedFromHeadlines/total)*100);
+        makeCard(d.idx, d.total, d.title, d.source, d.link, d.date, d.cycle);
+        countEl.textContent = `${d.idx}/${d.total}`;
       }catch(_){}
     });
 
-    // NEW: robust consensus + per-card summary update
     es.addEventListener('summary', (ev) => {
       try{
         const d = JSON.parse(ev.data);
         if (DEBUG) console.debug('summary', d);
-        updateSummary(d.idx, d.readable || '');
+        updateSummary(d.idx, d.readable || '', d.cycle);
         addConsensusEvidence(d);
       }catch(_){}
     });
 
-    // Back-compat if server emits a single 'story' event
-    es.addEventListener('story', (ev) => {
+    es.addEventListener('progress', (ev) => {
       try{
         const d = JSON.parse(ev.data);
-        if (DEBUG) console.debug('story', d);
-        if (!cards.has(d.index)) makeCard(d.index, d.total, d.title, d.source, d.link, d.date);
-        updateSummary(d.index, d.readable || '');
+        if (DEBUG) console.debug('progress', d);
+        if (typeof d.progress === 'number') setProgress(d.progress);
+        countEl.textContent = `${d.processed}/${d.total}`;
+      }catch(_){}
+    });
+
+    es.addEventListener('cycle_complete', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('cycle_complete', d);
+        statusText.textContent = `Cycle ${d.cycle} complete`;
+        totalUnique.textContent = d.total_unique;
+        totalStoriesEver += d.new_stories;
+        setProgress(100);
+      }catch(_){}
+    });
+
+    es.addEventListener('waiting', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('waiting', d);
+        statusText.textContent = d.message;
+        setProgress(0);
+      }catch(_){}
+    });
+
+    es.addEventListener('stopped', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        if (DEBUG) console.debug('stopped', d);
+        statusText.textContent = d.message;
+        stopTimer();
+        startBtn.style.display = 'inline-block';
+        stopBtn.style.display = 'none';
+        es.close();
+      }catch(_){}
+    });
+
+    es.addEventListener('error', (ev) => {
+      try{
+        const d = JSON.parse(ev.data);
+        console.error('Error:', d);
+        statusText.textContent = `Error: ${d.error}`;
       }catch(_){}
     });
 
     es.addEventListener('done', () => {
       stopTimer();
-      if (total === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'muted';
-        empty.textContent = 'No articles found for this query.';
-        liveList.appendChild(empty);
-      }
-      setProgress(100);
+      startBtn.style.display = 'inline-block';
+      stopBtn.style.display = 'none';
       es.close();
     });
+  });
 
-    es.addEventListener('error', () => {
-      stopTimer();
-      es.close();
-    });
+  stopBtn.addEventListener('click', async () => {
+    if (!currentSearchId) return;
+    stopBtn.disabled = true;
+    stopBtn.textContent = '⏹ Stopping...';
+    
+    await fetch(`/stop_search/${currentSearchId}`, {method:'POST'});
+    
+    statusText.textContent = 'Stop signal sent...';
   });
 })();
 </script>
 {% endblock %}
+    
