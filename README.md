@@ -7,6 +7,7 @@ A powerful real-time news monitoring and analysis system that uses AI to track, 
 ![Flask](https://img.shields.io/badge/Flask-2.3+-red) 
 ![Ollama](https://img.shields.io/badge/Ollama-Compatible-purple)
 
+
 ## ✨ Features
 
 ### 🔍 **Smart News Discovery**
@@ -104,6 +105,8 @@ Scout/
 ```
 
 ## 🎯 Usage Examples
+
+![ui](https://github.com/cas1m1r/Scout/blob/main/ui_example.png?raw=true)
 
 ### Basic News Monitoring
 1. Enter a search topic: `"climate protests"`
